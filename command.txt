@@ -1,0 +1,89 @@
+# 1. 安装依赖
+pip install -r requirements.txt
+pip install monotonic-align
+pip install textparser-${lastest-version}.tar.gz
+
+# 2. 数据准备
+# 2.1 生成文本vector，下面操作会在.wav同目录下生成.vec256文件
+cd /nfs/yuanwuwen/tts/data
+cd guiji_230810
+cat txt/all523.txt | text-parser -o wav
+cd ../dataset
+cat txt/all.txt | text-parser -o wav
+cd ../s684
+cat txt/s684.lab | text-vectorization -o wav
+cd ../cmu_arctic
+cat txt/all.txt | text-parser -o wav
+cd ../cmu_arctic
+cat all-108.txt | text-parser -o wav
+
+# 2.2 提取情感向量，会在.wav同目录下生成.emo文件
+cd ./VITS/emotional-vits3/
+find /nfs/yuanwuwen/tts/data/dataset -name "*.wav" > files.scp
+find /nfs/yuanwuwen/tts/data/guiji_230810 -name "*.wav" >> files.scp
+find /nfs/yuanwuwen/tts/data/s684 -name "*.wav" >> files.scp
+find /nfs/yuanwuwen/tts/data/cmu_arctic -name "*.wav" >> files.scp
+find /nfs/yuanwuwen/tts/data/VCTK-Corpus -name "*.wav" >> files.scp
+python toolkits/extract_emotion2.py --scp files.scp
+# 上面会用到情感预训练模型: /nfs/yuanwuwen/tts/w2v2-L-robust-12.6bc4a7fd-1.1.0.zip，需要将该文件复制到~/.cache/audeer/cache/
+rm -f files.scp
+
+# 2.3 生成filelist
+cd ./VITS/emotional-vits3/
+# 参考filelists/s1325.scp中的格式
+# 格式：vecfn|wavfn|emofn|spkid
+
+# 2.4 配置configs/s1325.scp中的"training_files"和"validation_files"
+
+# 3. training
+# 3.1 training from scratch
+# !!!注意：如果数据量比较大可能出现无法收敛的情况。解决方法是可以先使用100+hr的数据预训练10k steps，大概dur_loss下降到小于1.0
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train.py -c configs/s1322.json -m s1322
+# 也可切换鉴别式和stft loss继续训练，下面这步也可以不做。
+#CUDA_VISIBLE_DEVICES=0,1,2,3 python train_stft.py -c configs/s1325.json -m s1325-stft-from-s1322 --ckptG logs/s1322/G_975000.pth
+# 区别："train.py"使用mel_loss+adv_loss+fm_loss；"train_stft.py"使用stft_loss+adv_loss。并且鉴别式不一样。
+
+# 3.2 finetune from pretrained
+# 比如微调刘润liurun
+python train.py -a -d -c configs/liurun.json -m liurun --ckptG logs/s1322/G_975000.pth --ckptD logs/s1322/D_975000.pth
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!
+导出emo，# 以刘润liurun模型为例
+# 1. 导出模型
+python export.py --greedy 3 --checkpoint logs/liurun/ --outdir ./checkpoint/liurun
+
+# 2. 聚类情感向量
+# 每个发音人都有自己的emo聚类，根据每个发音人风格和录音数目，选择K的大小
+K=7
+spkid=166
+cut -d "|" -f 3 filelists/liurun.scp > emo.scp
+python toolkits/cluster_emotion.py $K emo.scp ./checkpoint/${spkid}.emo
+
+# 3. 推理
+#python vits_wrap.py --help
+python vits_wrap.py -c ./checkpoint/liurun/checkpoint.pth -i ${spkid} -e "${spkid}:0" -t your/input.txt -o your/output/dir -n filename.wav -d "cuda:0"
+
+
+!!!!!!!!!!!!!!!!!!!!!
+# 1. 安装依赖
+pip install -r requirments.txt
+pip install textparser-${lastest-version}.tar.gz
+pip install fbandext-${lastest-version}.tar.gz
+
+# 2. 推理时需要的py文件
+attentions.py
+commons.py
+export.py
+infer.py
+__init__.py
+models.py
+modules.py
+utils.py
+version.py
+vits_wrap.py
+
+# 3. 备份的模型位置如下，另外@吴海娥(黄蓉) 也有备份
+ls -hl /nfs/yuanwuwen/tts/VITS/intergration_package
