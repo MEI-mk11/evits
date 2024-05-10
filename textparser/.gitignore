@@ -1,9 +1,0 @@
-__pycache__
-egs/
-textparser.egg-info
-checkpoint
-build
-dist
-*.pyc
-*.log
-*.wav
